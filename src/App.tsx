@@ -70,7 +70,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight text-[var(--color-text-primary)] tracking-tight">Sorare Market Scanner</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.4</p>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.5</p>
             </div>
           </div>
           <div className="flex items-center gap-2">

@@ -1,64 +1,77 @@
-import { useEffect, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MarketEventPayload, TokenOffer } from '../types';
 
 export function useSorareSocket() {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [marketEvents, setMarketEvents] = useState<TokenOffer[]>([]);
+  
+  const mockIntervalRef = useRef<number | null>(null);
 
+  // 実際のアプリではここで graphql-ws クライアント等を初期化します
+  // GitHub Pagesで動作させるため、サーバー通信はブラウザから直接行う想定のシミュレーションとします。
   useEffect(() => {
-    // Connect to the same host that serves the Vite app (our Express server)
-    const socketInstance = io();
-
-    socketInstance.on('connect', () => {
-      setIsConnected(true);
-      console.log('Connected to Sorare Market Socket');
-    });
-
-    socketInstance.on('disconnect', () => {
-      setIsConnected(false);
-      setIsAuthenticated(false);
-      console.log('Disconnected from Socket');
-    });
-
-    socketInstance.on('authenticated', (response: { success: boolean }) => {
-      if (response.success) {
-        setIsAuthenticated(true);
-      }
-    });
-
-    socketInstance.on('market-event', (payload: MarketEventPayload) => {
-      if (payload?.data?.tokenOfferWasCreated) {
-        setMarketEvents((prev) => [payload.data.tokenOfferWasCreated, ...prev].slice(0, 50)); // Keep last 50
-      }
-    });
-
-    setSocket(socketInstance);
-
+    setIsConnected(true);
     return () => {
-      socketInstance.disconnect();
+      setIsConnected(false);
+      if (mockIntervalRef.current) clearInterval(mockIntervalRef.current);
     };
   }, []);
 
-  const authenticate = useCallback((credentials: { email?: string; password?: string }) => {
-    if (socket) {
-      socket.emit('authenticate', credentials);
-    }
-  }, [socket]);
+  const authenticate = useCallback(async (credentials: { email?: string; password?: string }) => {
+    // 実際のSorare APIがCORSを許可している場合は、ブラウザから直接fetchでログインしトークンを取得できます。
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        if (credentials.email && credentials.password) {
+          setIsAuthenticated(true);
+          console.log('Client successfully authenticated. Mock JWT issued.');
+        }
+        resolve(true);
+      }, 800);
+    });
+  }, []);
 
   const subscribe = useCallback((filters: any) => {
-    if (socket) {
-      socket.emit('subscribe', filters);
-    }
-  }, [socket]);
+    if (!isAuthenticated) return;
+    
+    console.log('Subscribed to market events with filters:', filters);
+    
+    const mockPlayers = ["Kylian Mbappé", "Lionel Messi", "Erling Haaland", "Vinícius Júnior", "Kevin De Bruyne", "Jude Bellingham", "Rodri", "Harry Kane", "Mohamed Salah", "Takefusa Kubo", "Kaoru Mitoma", "Wataru Endo"];
+    const mockRarities = ["Limited", "Rare", "Super Rare", "Unique"];
+    
+    if (mockIntervalRef.current) clearInterval(mockIntervalRef.current);
+    
+    mockIntervalRef.current = window.setInterval(() => {
+      const player = mockPlayers[Math.floor(Math.random() * mockPlayers.length)];
+      const rarity = mockRarities[Math.floor(Math.random() * mockRarities.length)];
+      const ethPrice = (Math.random() * 0.1 + 0.001).toFixed(4);
+      
+      const payload = {
+        data: {
+          tokenOfferWasCreated: {
+            id: `offer-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            price: ethPrice,
+            token: {
+              player: { displayName: player, slug: player.toLowerCase().replace(/ /g, "-") },
+              name: `${player} 2023-2024`,
+              rarity: rarity
+            },
+            timestamp: new Date().toISOString()
+          }
+        }
+      };
+      
+      setMarketEvents((prev) => [payload.data.tokenOfferWasCreated, ...prev].slice(0, 50));
+    }, 4000);
+  }, [isAuthenticated]);
 
   const unsubscribe = useCallback(() => {
-    if (socket) {
-      socket.emit('unsubscribe');
+    console.log('Unsubscribed from market events');
+    if (mockIntervalRef.current) {
+      clearInterval(mockIntervalRef.current);
+      mockIntervalRef.current = null;
     }
-  }, [socket]);
+  }, []);
   
   const clearEvents = useCallback(() => {
     setMarketEvents([]);
