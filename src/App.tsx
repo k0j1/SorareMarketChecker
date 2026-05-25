@@ -32,9 +32,18 @@ export default function App() {
     return isPlayerMatch && isPriceMatch;
   };
 
-  const handleAuthenticate = () => {
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  const handleAuthenticate = async () => {
     if (email && password) {
-      authenticate({ email, password });
+      setIsAuthenticating(true);
+      setAuthError('');
+      const success = await authenticate({ email, password });
+      setIsAuthenticating(false);
+      if (!success) {
+        setAuthError('Authentication failed. Please check your credentials.');
+      }
     }
   };
 
@@ -137,12 +146,13 @@ export default function App() {
                   className="w-full h-10 shadow-sm"
                   variant={isAuthenticated ? "secondary" : "primary"}
                   onClick={handleAuthenticate}
-                  disabled={isAuthenticated || !isConnected || !email || !password}
+                  disabled={isAuthenticated || !isConnected || !email || !password || isAuthenticating}
                 >
-                  {isAuthenticated ? "Session Active" : "Login"}
+                  {isAuthenticated ? "Session Active" : isAuthenticating ? "Logging in..." : "Login"}
                 </Button>
               </div>
             </div>
+            {authError && <p className="text-sm font-medium text-red-500 mt-2">{authError}</p>}
             <p className="text-xs text-[var(--color-text-muted)] mt-3">
               Uses Sorare's salt + bcrypt authentication flow to securely obtain a JWT token for real-time GraphQL Subscriptions.
             </p>

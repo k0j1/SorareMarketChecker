@@ -1,9 +1,9 @@
 import React from "react";
 import { cn } from "@/src/lib/utils";
 
-interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
+type BadgeProps = React.HTMLAttributes<HTMLDivElement> & {
   variant?: "default" | "success" | "warning" | "danger" | "rare" | "limited" | "superrare" | "unique";
-}
+};
 
 export function Badge({ className, variant = "default", ...props }: BadgeProps) {
   return (
