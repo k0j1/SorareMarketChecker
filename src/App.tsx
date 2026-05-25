@@ -79,7 +79,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight text-[var(--color-text-primary)] tracking-tight">Sorare Market Scanner</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.5</p>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.6</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -126,7 +126,7 @@ export default function App() {
                   placeholder="your.email@example.com" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  disabled={isAuthenticated || !isConnected}
+                  disabled={isAuthenticated || isAuthenticating}
                 />
               </div>
               <div className="md:col-span-5 space-y-2">
@@ -138,7 +138,7 @@ export default function App() {
                   placeholder="Your Sorare password..." 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={isAuthenticated || !isConnected}
+                  disabled={isAuthenticated || isAuthenticating}
                 />
               </div>
               <div className="md:col-span-3">
@@ -146,7 +146,7 @@ export default function App() {
                   className="w-full h-10 shadow-sm"
                   variant={isAuthenticated ? "secondary" : "primary"}
                   onClick={handleAuthenticate}
-                  disabled={isAuthenticated || !isConnected || !email || !password || isAuthenticating}
+                  disabled={isAuthenticated || !email || !password || isAuthenticating}
                 >
                   {isAuthenticated ? "Session Active" : isAuthenticating ? "Logging in..." : "Login"}
                 </Button>
