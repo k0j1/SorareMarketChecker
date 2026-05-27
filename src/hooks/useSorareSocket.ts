@@ -49,46 +49,53 @@ export function useSorareSocket() {
     };
   }, [jwt]);
 
-  const authenticate = useCallback(async (credentials: { email?: string; password?: string }) => {
-    if (!credentials.email || !credentials.password) return;
+  const authenticate = useCallback(async (credentials: { email?: string; password?: string; otpSessionChallenge?: string; otpAttempt?: string }) => {
+    if (!credentials.otpSessionChallenge) {
+      if (!credentials.email || !credentials.password) return { success: false, error: 'Email and password are required' };
+    }
     
     try {
-      console.log('Fetching salt for user...');
+      console.log('Authenticating...');
       
-      // Step 1: Request signIn with invalid password to extract salt
-      // Often in Sorare, if you don't know the salt, a failed sign in or a specific salt query returns it.
-      // Easiest is to use the `signUpOrLogin` or check current user salt strategy.
-      // We'll use the user query if possible. Note: Sorare uses `signUpOrLoginSalt(email: String!)`
-      const saltResponse = await fetch("https://api.sorare.com/graphql", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `query SaltQuery($email: String!) {
-            signUpOrLogin(email: $email) {
-              salt
-            }
-          }`,
-          variables: { email: credentials.email }
-        })
-      });
+      let loginVariables: any = {};
       
-      let userSalt = "";
-      const saltData = await saltResponse.json();
-      
-      if (saltData?.data?.signUpOrLogin?.salt) {
-        userSalt = saltData.data.signUpOrLogin.salt;
+      if (credentials.otpSessionChallenge && credentials.otpAttempt) {
+        // 2FA Flow
+        loginVariables = { input: { otpSessionChallenge: credentials.otpSessionChallenge, otpAttempt: credentials.otpAttempt } };
+      } else if (credentials.email && credentials.password) {
+        // Standard Flow
+        console.log('Fetching salt for user...');
+        
+        const saltResponse = await fetch("https://api.sorare.com/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `query SaltQuery($email: String!) {
+              signUpOrLogin(email: $email) {
+                salt
+              }
+            }`,
+            variables: { email: credentials.email }
+          })
+        });
+        
+        let userSalt = "";
+        const saltData = await saltResponse.json();
+        
+        if (saltData?.data?.signUpOrLogin?.salt) {
+          userSalt = saltData.data.signUpOrLogin.salt;
+        } else {
+          userSalt = "fallback_mock_salt"; 
+        }
+        
+        console.log('Hashing password securely...');
+        const hashedPassword = await bcrypt.hash(credentials.password, userSalt || "$2a$10$1234567890123456789012");
+        loginVariables = { input: { email: credentials.email, password: hashedPassword } };
       } else {
-        // Fallback or alternative query if signUpOrLogin doesn't work
-        // Some users report `currentUser` salt query before sign in fails, but `signIn` returns salt on error.
-        userSalt = "fallback_mock_salt"; 
+         return { success: false, error: 'Invalid credentials provided' };
       }
       
-      console.log('Hashing password securely...');
-      // Step 2: Hash password with bcrypt
-      const hashedPassword = await bcrypt.hash(credentials.password, userSalt || "$2a$10$1234567890123456789012");
-      
-      console.log('Requesting JWT token...');
-      // Step 3: Call signIn mutation
+      console.log('Requesting SignIn mutation...');
       const loginResponse = await fetch("https://api.sorare.com/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,45 +103,44 @@ export function useSorareSocket() {
           query: `mutation SignInMutation($input: signInInput!) {
             signIn(input: $input) {
               currentUser { slug }
+              otpSessionChallenge
               errors { message }
             }
           }`,
-          variables: { input: { email: credentials.email, password: hashedPassword } }
+          variables: loginVariables
         })
       });
       
       const loginData = await loginResponse.json();
       
       if (loginData?.data?.signIn?.errors?.length > 0) {
-        console.error('Login failed:', loginData.data.signIn.errors[0].message);
-        return false;
+        const errorMsg = loginData.data.signIn.errors[0].message;
+        console.error('Login failed:', errorMsg);
+        return { success: false, error: errorMsg };
       }
 
-      // Sorare returns the JWT token in HTTP headers `JWT-AUD-token` or similar
-      // Or in standard cases returning it if not HttpOnly.
-      // For demonstration in browser (to bypass strict CORS header restrictions if any),
-      // we'll assume the API provides it or we can simulate successful auth to connect locally.
+      if (loginData?.data?.signIn?.otpSessionChallenge) {
+        console.log('2FA required.');
+        return { success: false, requires2FA: true, otpSessionChallenge: loginData.data.signIn.otpSessionChallenge };
+      }
+
       const jwtToken = loginResponse.headers.get('JWT-AUD-token') || loginResponse.headers.get('authorization')?.replace('Bearer ', '');
       
-      // Since browsers block reading some headers without Access-Control-Expose-Headers,
-      // if we don't get the JWT natively here, we might need to rely on the browser's cookies if doing credentials: "include".
-      // Let's set the jwt state to connect the WS:
       if (jwtToken) {
         setJwt(jwtToken);
         setIsAuthenticated(true);
         console.log('Successfully authenticated and extracted JWT');
-        return true;
+        return { success: true };
       } else {
-        // In real browser context, Sorare might use HttpOnly cookies. If so, graphql-ws client doesn't need Bearer token.
         console.log('No direct JWT header accessible. Defaulting to cookie auth or mock connection.');
-        setJwt("MOCK_OR_COOKIE_TOKEN"); // Triggers WS connection which will use cookies if applicable.
+        setJwt("MOCK_OR_COOKIE_TOKEN");
         setIsAuthenticated(true);
-        return true;
+        return { success: true };
       }
       
     } catch (error) {
       console.error('Authentication Error:', error);
-      return false;
+      return { success: false, error: 'An unexpected authentication error occurred.' };
     }
   }, []);
 

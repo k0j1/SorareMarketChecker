@@ -34,16 +34,36 @@ export default function App() {
 
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [otpSessionChallenge, setOtpSessionChallenge] = useState<string | null>(null);
+  const [otpAttempt, setOtpAttempt] = useState('');
 
   const handleAuthenticate = async () => {
-    if (email && password) {
-      setIsAuthenticating(true);
-      setAuthError('');
-      const success = await authenticate({ email, password });
-      setIsAuthenticating(false);
-      if (!success) {
-        setAuthError('Authentication failed. Please check your credentials.');
+    setIsAuthenticating(true);
+    setAuthError('');
+    
+    let result: { success: boolean; requires2FA?: boolean; otpSessionChallenge?: string; error?: string } | undefined;
+
+    if (otpSessionChallenge) {
+      if (otpAttempt) {
+        result = await authenticate({ otpSessionChallenge, otpAttempt });
+      } else {
+        result = { success: false, error: 'Please enter your 2FA code.' };
       }
+    } else if (email && password) {
+      result = await authenticate({ email, password });
+    } else {
+      result = { success: false, error: 'Email and password are required.' };
+    }
+    
+    setIsAuthenticating(false);
+    
+    if (result?.requires2FA && result?.otpSessionChallenge) {
+      setOtpSessionChallenge(result.otpSessionChallenge);
+    } else if (result?.success) {
+      setOtpSessionChallenge(null);
+      setOtpAttempt('');
+    } else {
+      setAuthError(result?.error || 'Authentication failed. Please check your credentials.');
     }
   };
 
@@ -79,7 +99,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight text-[var(--color-text-primary)] tracking-tight">Sorare Market Scanner</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.6</p>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.7</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -126,7 +146,7 @@ export default function App() {
                   placeholder="your.email@example.com" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  disabled={isAuthenticated || isAuthenticating}
+                  disabled={isAuthenticated || isAuthenticating || !!otpSessionChallenge}
                 />
               </div>
               <div className="md:col-span-5 space-y-2">
@@ -138,22 +158,62 @@ export default function App() {
                   placeholder="Your Sorare password..." 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={isAuthenticated || isAuthenticating}
+                  disabled={isAuthenticated || isAuthenticating || !!otpSessionChallenge}
                 />
               </div>
               <div className="md:col-span-3">
-                <Button 
-                  className="w-full h-10 shadow-sm"
-                  variant={isAuthenticated ? "secondary" : "primary"}
-                  onClick={handleAuthenticate}
-                  disabled={isAuthenticated || !email || !password || isAuthenticating}
-                >
-                  {isAuthenticated ? "Session Active" : isAuthenticating ? "Logging in..." : "Login"}
-                </Button>
+                {!otpSessionChallenge && (
+                  <Button 
+                    className="w-full h-10 shadow-sm"
+                    variant={isAuthenticated ? "secondary" : "primary"}
+                    onClick={handleAuthenticate}
+                    disabled={isAuthenticated || !email || !password || isAuthenticating}
+                  >
+                    {isAuthenticated ? "Session Active" : isAuthenticating ? "Logging in..." : "Login"}
+                  </Button>
+                )}
               </div>
             </div>
+            
+            {otpSessionChallenge && (
+              <div className="mt-4 p-4 border rounded-md bg-transparent border-[var(--color-border-default)]">
+                <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-blue-500" />
+                  Two-Factor Authentication Required
+                </label>
+                <div className="flex gap-3">
+                  <Input 
+                    type="text" 
+                    placeholder="Enter 6-digit OTP code" 
+                    value={otpAttempt}
+                    onChange={(e) => setOtpAttempt(e.target.value)}
+                    disabled={isAuthenticating}
+                    maxLength={6}
+                    className="max-w-[200px]"
+                  />
+                  <Button 
+                    variant="primary"
+                    onClick={handleAuthenticate}
+                    disabled={!otpAttempt || isAuthenticating}
+                  >
+                    {isAuthenticating ? "Verifying..." : "Verify OTP"}
+                  </Button>
+                  <Button 
+                    variant="secondary"
+                    onClick={() => {
+                      setOtpSessionChallenge(null);
+                      setOtpAttempt('');
+                    }}
+                    disabled={isAuthenticating}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+            
             {authError && <p className="text-sm font-medium text-red-500 mt-2">{authError}</p>}
-            <p className="text-xs text-[var(--color-text-muted)] mt-3">
+            <p className="text-xs text-[var(--color-text-muted)] mt-4">
               Uses Sorare's salt + bcrypt authentication flow to securely obtain a JWT token for real-time GraphQL Subscriptions.
             </p>
           </CardContent>
