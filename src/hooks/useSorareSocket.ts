@@ -49,7 +49,13 @@ export function useSorareSocket() {
     };
   }, [jwt]);
 
-  const authenticate = useCallback(async (credentials: { email?: string; password?: string; otpSessionChallenge?: string; otpAttempt?: string }) => {
+  const authenticate = useCallback(async (credentials: { email?: string; password?: string; otpSessionChallenge?: string; otpAttempt?: string; directJwt?: string }) => {
+    if (credentials.directJwt) {
+      setJwt(credentials.directJwt);
+      setIsAuthenticated(true);
+      return { success: true };
+    }
+
     if (!credentials.otpSessionChallenge) {
       if (!credentials.email || !credentials.password) return { success: false, error: 'Email and password are required' };
     }
