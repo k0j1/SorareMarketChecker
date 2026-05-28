@@ -32,9 +32,6 @@ export default function App() {
     return isPlayerMatch && isPriceMatch;
   };
 
-  const [loginMode, setLoginMode] = useState<'email' | 'jwt'>('email');
-  const [jwtToken, setJwtToken] = useState('');
-
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState('');
   const [otpSessionChallenge, setOtpSessionChallenge] = useState<string | null>(null);
@@ -46,24 +43,16 @@ export default function App() {
     
     let result: { success: boolean; requires2FA?: boolean; otpSessionChallenge?: string; error?: string } | undefined;
 
-    if (loginMode === 'jwt') {
-      if (jwtToken) {
-        result = await authenticate({ directJwt: jwtToken });
+    if (otpSessionChallenge) {
+      if (otpAttempt) {
+        result = await authenticate({ otpSessionChallenge, otpAttempt });
       } else {
-        result = { success: false, error: 'JWT token is required.' };
+        result = { success: false, error: 'Please enter your 2FA code.' };
       }
+    } else if (email && password) {
+      result = await authenticate({ email, password });
     } else {
-      if (otpSessionChallenge) {
-        if (otpAttempt) {
-          result = await authenticate({ otpSessionChallenge, otpAttempt });
-        } else {
-          result = { success: false, error: 'Please enter your 2FA code.' };
-        }
-      } else if (email && password) {
-        result = await authenticate({ email, password });
-      } else {
-        result = { success: false, error: 'Email and password are required.' };
-      }
+      result = { success: false, error: 'Email and password are required.' };
     }
     
     setIsAuthenticating(false);
@@ -110,7 +99,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight text-[var(--color-text-primary)] tracking-tight">Sorare Market Scanner</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.9</p>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.8</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -223,7 +212,20 @@ export default function App() {
               </div>
             )}
             
-            {authError && <p className="text-sm font-medium text-red-500 mt-2">{authError}</p>}
+            {authError && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                  <div className="flex flex-col gap-1">
+                    {authError.split('\n').map((err, i) => (
+                      <p key={i} className="text-sm font-medium text-red-600 leading-tight">
+                        {err}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             <p className="text-xs text-[var(--color-text-muted)] mt-4">
               Uses Sorare's salt + bcrypt authentication flow to securely obtain a JWT token for real-time GraphQL Subscriptions.
             </p>
