@@ -20,8 +20,18 @@ export interface MarketEventPayload {
   };
 }
 
-export interface SubscriptionConfig {
-  playerNameQuery: string;
-  targetMaxPriceEth: string;
-  isActive: boolean;
+export interface UserCard {
+  id: string;
+  name: string;
+  slug: string;
+  pictureUrl: string | null;
+  rarityTyped: string;
+  player: {
+    displayName: string;
+  };
+  lowestPriceCardAnySeason?: {
+    publicMinPrices?: {
+      eurCents: number;
+    } | null;
+  } | null;
 }

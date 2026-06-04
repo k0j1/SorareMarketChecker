@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import bcrypt from 'bcryptjs';
 import { createClient, Client } from 'graphql-ws';
-import { MarketEventPayload, TokenOffer } from '../types';
+import { MarketEventPayload, TokenOffer, UserCard } from '../types';
 
 export function useSorareSocket() {
   const [isConnected, setIsConnected] = useState(false);
@@ -66,26 +66,18 @@ export function useSorareSocket() {
         // Standard Flow
         console.log('Fetching salt for user...');
         
-        const saltResponse = await fetch("https://api.sorare.com/graphql", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: `query SaltQuery($email: String!) {
-              signUpOrLogin(email: $email) {
-                salt
-              }
-            }`,
-            variables: { email: credentials.email }
-          })
-        });
+        const saltResponse = await fetch(`/api/sorare/users/${encodeURIComponent(credentials.email)}`);
         
         let userSalt = "";
         const saltData = await saltResponse.json();
         
-        if (saltData?.data?.signUpOrLogin?.salt) {
-          userSalt = saltData.data.signUpOrLogin.salt;
+        if (saltData?.salt) {
+          userSalt = saltData.salt;
         } else {
-          userSalt = "fallback_mock_salt"; 
+          if (saltData?.error) {
+            return { success: false, error: saltData.error };
+          }
+          userSalt = "$2a$10$1234567890123456789012"; 
         }
         
         console.log('Hashing password securely...');
@@ -96,13 +88,17 @@ export function useSorareSocket() {
       }
       
       console.log('Requesting SignIn mutation...');
-      const loginResponse = await fetch("https://api.sorare.com/graphql", {
+      const loginResponse = await fetch("/api/sorare/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: `mutation SignInMutation($input: signInInput!) {
             signIn(input: $input) {
               currentUser { slug }
+              jwtToken(aud: "sorare-market-scanner") {
+                token
+                expiredAt
+              }
               otpSessionChallenge
               errors { message }
             }
@@ -120,6 +116,12 @@ export function useSorareSocket() {
         return { success: false, error: errorMsgs };
       }
       
+      // Check for 2FA Session Challenge first!
+      if (loginData?.data?.signIn?.otpSessionChallenge) {
+        console.log('2FA required.');
+        return { success: false, requires2FA: true, otpSessionChallenge: loginData.data.signIn.otpSessionChallenge };
+      }
+
       // Check for specific signIn mutation errors
       if (loginData?.data?.signIn?.errors?.length > 0) {
         const errorMsgs = loginData.data.signIn.errors.map((e: any) => e.message).join('\n');
@@ -127,12 +129,9 @@ export function useSorareSocket() {
         return { success: false, error: errorMsgs };
       }
 
-      if (loginData?.data?.signIn?.otpSessionChallenge) {
-        console.log('2FA required.');
-        return { success: false, requires2FA: true, otpSessionChallenge: loginData.data.signIn.otpSessionChallenge };
-      }
-
-      const jwtToken = loginResponse.headers.get('JWT-AUD-token') || loginResponse.headers.get('authorization')?.replace('Bearer ', '');
+      const jwtTokenPayload = loginData?.data?.signIn?.jwtToken?.token;
+      const jwtTokenHeader = loginResponse.headers.get('JWT-AUD-token') || loginResponse.headers.get('authorization')?.replace('Bearer ', '');
+      const jwtToken = jwtTokenPayload || jwtTokenHeader;
       
       if (jwtToken) {
         setJwt(jwtToken);
@@ -146,9 +145,9 @@ export function useSorareSocket() {
         return { success: true };
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Authentication Error:', error);
-      return { success: false, error: 'An unexpected authentication error occurred.' };
+      return { success: false, error: error?.message || 'An unexpected authentication error occurred.' };
     }
   }, []);
 
@@ -202,13 +201,110 @@ export function useSorareSocket() {
     setMarketEvents([]);
   }, []);
 
+  const [userCards, setUserCards] = useState<UserCard[]>([]);
+  const [isLoadingUserCards, setIsLoadingUserCards] = useState(false);
+  const userCardsCursorRef = useRef<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const loadUserCards = useCallback(async (options: { loadMore?: boolean, rarities?: string[] } = {}) => {
+    const { loadMore = false, rarities = ['limited', 'rare', 'super_rare', 'unique', 'custom'] } = options;
+
+    if (!jwt || jwt === "MOCK_OR_COOKIE_TOKEN") {
+      console.warn("JWT is missing or mocked. Cannot fetch real user cards.");
+      return;
+    }
+    
+    setIsLoadingUserCards(true);
+    try {
+      if (!loadMore) {
+        userCardsCursorRef.current = null;
+        setHasNextPage(false);
+      }
+      const cursorArg = loadMore && userCardsCursorRef.current ? `, after: "${userCardsCursorRef.current}"` : "";
+      const raritiesArg = rarities.length > 0 ? `, rarities: [${rarities.join(", ")}]` : "";
+      
+      const response = await fetch("/api/sorare/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${jwt}`,
+          "JWT-AUD": "sorare-market-scanner"
+        },
+        body: JSON.stringify({
+          query: `
+            query CurrentUserCards {
+              currentUser {
+                cards(first: 20${cursorArg}${raritiesArg}) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                  nodes {
+                    ... on Card {
+                      id
+                      name
+                      slug
+                      pictureUrl(derivative: "tinified")
+                      rarityTyped
+                      player {
+                        displayName
+                      }
+                      lowestPriceCardAnySeason {
+                        ... on Card {
+                          publicMinPrices {
+                            eurCents
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `
+        })
+      });
+      
+      const data = await response.json();
+      console.log("User Cards Response:", data);
+      
+      if (data?.errors) {
+        console.error("GraphQL errors in cards query:\\n" + JSON.stringify(data.errors, null, 2));
+      }
+
+      if (data?.data?.currentUser?.cards) {
+        const newNodes = (data.data.currentUser.cards.nodes || []).filter((node: any) => node && node.id);
+        if (loadMore) {
+          setUserCards(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const uniqueNewNodes = newNodes.filter((n: any) => !existingIds.has(n.id));
+            return [...prev, ...uniqueNewNodes];
+          });
+        } else {
+          setUserCards(newNodes);
+        }
+        
+        setHasNextPage(data.data.currentUser.cards.pageInfo?.hasNextPage || false);
+        userCardsCursorRef.current = data.data.currentUser.cards.pageInfo?.endCursor || null;
+      }
+    } catch (e) {
+      console.error("Failed to load user cards:", e);
+    } finally {
+      setIsLoadingUserCards(false);
+    }
+  }, [jwt]);
+
   return {
     isConnected,
     isAuthenticated,
     marketEvents,
+    userCards,
+    isLoadingUserCards,
+    hasNextPage,
     authenticate,
     subscribe,
     unsubscribe,
-    clearEvents
+    clearEvents,
+    loadUserCards
   };
 }

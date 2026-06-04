@@ -10,7 +10,19 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TokenOffer } from './types';
 
 export default function App() {
-  const { isConnected, isAuthenticated, marketEvents, authenticate, subscribe, unsubscribe, clearEvents } = useSorareSocket();
+  const { 
+    isConnected, 
+    isAuthenticated, 
+    marketEvents, 
+    userCards,
+    isLoadingUserCards,
+    hasNextPage,
+    authenticate, 
+    subscribe, 
+    unsubscribe, 
+    clearEvents,
+    loadUserCards
+  } = useSorareSocket();
   const [isScanning, setIsScanning] = useState(false);
   
   // Auth Settings
@@ -25,7 +37,10 @@ export default function App() {
   const checkAlert = (offer: TokenOffer) => {
     if (!targetPlayer || !maxPriceEth) return false;
     
-    const playerName = offer.token.player.displayName.toLowerCase();
+    const displayName = offer.token.player?.displayName;
+    if (!displayName) return false;
+
+    const playerName = displayName.toLowerCase();
     const isPlayerMatch = playerName.includes(targetPlayer.toLowerCase());
     const isPriceMatch = parseFloat(offer.price) <= parseFloat(maxPriceEth);
     
@@ -36,6 +51,16 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [otpSessionChallenge, setOtpSessionChallenge] = useState<string | null>(null);
   const [otpAttempt, setOtpAttempt] = useState('');
+
+  const ALL_RARITIES = ['common', 'limited', 'rare', 'super_rare', 'unique'];
+  const [selectedRarities, setSelectedRarities] = useState<string[]>(['limited', 'rare', 'super_rare', 'unique']);
+
+  // Automatically load user cards when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadUserCards({ loadMore: false, rarities: selectedRarities });
+    }
+  }, [isAuthenticated]);
 
   const handleAuthenticate = async () => {
     setIsAuthenticating(true);
@@ -78,7 +103,8 @@ export default function App() {
     }
   };
 
-  const getRarityVariant = (rarity: string) => {
+  const getRarityVariant = (rarity?: string) => {
+    if (!rarity) return 'default';
     switch (rarity.toLowerCase()) {
       case 'limited': return 'limited';
       case 'rare': return 'rare';
@@ -99,7 +125,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight text-[var(--color-text-primary)] tracking-tight">Sorare Market Scanner</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.8</p>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-text-muted)]">Version 1.0.22</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -227,10 +253,116 @@ export default function App() {
               </div>
             )}
             <p className="text-xs text-[var(--color-text-muted)] mt-4">
-              Uses Sorare's salt + bcrypt authentication flow to securely obtain a JWT token for real-time GraphQL Subscriptions.
+              Uses Sorare's salt + bcrypt authentication flow to securely obtain a JWT token for real-time GraphQL Subscriptions. 
+              (Note: 2FA is securely requested only once per session token generation.)
             </p>
           </CardContent>
         </Card>
+
+        {/* User Cards Section */}
+        {isAuthenticated && (
+          <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <h2 className="text-xl font-bold tracking-tight">My Cards</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  {ALL_RARITIES.map(rarity => (
+                    <Badge 
+                      key={rarity}
+                      variant={selectedRarities.includes(rarity) ? getRarityVariant(rarity) as any : "secondary"}
+                      className={cn(
+                        "cursor-pointer hover:opacity-80 transition-opacity",
+                        !selectedRarities.includes(rarity) && "opacity-50 grayscale"
+                      )}
+                      onClick={() => {
+                        setSelectedRarities(prev => 
+                          prev.includes(rarity) 
+                            ? prev.filter(r => r !== rarity)
+                            : [...prev, rarity]
+                        );
+                      }}
+                    >
+                      {rarity}
+                    </Badge>
+                  ))}
+                  <div className="w-px h-6 bg-[var(--color-border-default)] mx-1 hidden sm:block" />
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    onClick={() => loadUserCards({ loadMore: false, rarities: selectedRarities })}
+                    disabled={isLoadingUserCards}
+                    className="w-full sm:w-auto"
+                  >
+                    {isLoadingUserCards ? 'Loading...' : 'Refresh'}
+                  </Button>
+                </div>
+              </div>
+            
+            {isLoadingUserCards && userCards.length === 0 ? (
+              <div className="h-48 flex flex-col items-center justify-center text-[var(--color-text-muted)] border-2 border-dashed border-[var(--color-border-card)] rounded-[var(--radius-xl)] bg-gray-50/30">
+                <p>Fetching your Sorare cards...</p>
+              </div>
+            ) : userCards.length === 0 ? (
+              <div className="h-48 flex flex-col items-center justify-center text-[var(--color-text-muted)] border-2 border-dashed border-[var(--color-border-card)] rounded-[var(--radius-xl)] bg-gray-50/30">
+                <p>No cards found in your collection.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {userCards.map((card, index) => {
+                    const floorPriceCents = card.lowestPriceCardAnySeason?.publicMinPrices?.eurCents;
+                    const floorPriceFormatted = floorPriceCents !== undefined && floorPriceCents !== null 
+                      ? `€${(floorPriceCents / 100).toFixed(2)}` 
+                      : '-.-';
+
+                    return (
+                      <Card key={card.id ? `${card.id}-${index}` : `card-${index}`} className="overflow-hidden border-[var(--color-border-default)] hover:border-[var(--color-accent-primary)] transition-colors group">
+                        <div className="aspect-[2/3] w-full relative bg-gray-100 overflow-hidden">
+                          {card.pictureUrl ? (
+                            <img 
+                              src={card.pictureUrl} 
+                              alt={card.name}
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-400">
+                              No Image
+                            </div>
+                          )}
+                          <div className="absolute top-2 right-2">
+                             <Badge variant={getRarityVariant(card.rarityTyped) as any} className="shadow-sm">
+                               {card.rarityTyped ? card.rarityTyped.toLowerCase() : 'Unknown'}
+                             </Badge>
+                          </div>
+                        </div>
+                        <div className="p-3 bg-white">
+                          <h3 className="font-semibold text-sm truncate" title={card.player?.displayName}>
+                            {card.player?.displayName || "Unknown Player"}
+                          </h3>
+                          <div className="mt-2 flex items-center justify-between">
+                            <span className="text-xs text-[var(--color-text-secondary)]">Floor</span>
+                            <span className="font-mono text-sm font-semibold">{floorPriceFormatted}</span>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+                {hasNextPage && (
+                  <div className="flex justify-center mt-4">
+                    <Button 
+                      variant="secondary" 
+                      onClick={() => loadUserCards({ loadMore: true, rarities: selectedRarities })}
+                      disabled={isLoadingUserCards}
+                    >
+                      {isLoadingUserCards ? 'Loading...' : 'Load More'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Filter / Scanner Configuration */}
         <Card className={cn(
@@ -313,11 +445,11 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 gap-3">
                 <AnimatePresence initial={false}>
-                  {marketEvents.map((event) => {
+                  {marketEvents.map((event, index) => {
                     const isAlert = checkAlert(event);
                     return (
                       <motion.div
-                        key={event.id}
+                        key={event.id ? `${event.id}-${index}` : `event-${index}`}
                         initial={{ opacity: 0, y: -20, scale: 0.98 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
